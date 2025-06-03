@@ -1,0 +1,4 @@
+services:
+  - name: fastapi-playwright
+    dockerfile: Dockerfile
+    port: 8000
