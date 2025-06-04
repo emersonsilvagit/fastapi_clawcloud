@@ -2,6 +2,7 @@ import subprocess
 import os
 import time
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+import ffmpeg
 
 async def extract_m3u8(url):
     """
@@ -109,4 +110,86 @@ def download_m3u8(m3u8_url, output_file):
         return False
     except Exception as e:
         print(f"❌ Unexpected error during download: {e}")
+        return False
+
+def get_video_duration(file_path):
+    try:
+        probe = ffmpeg.probe(file_path)
+        duration = float(probe['format']['duration'])
+        print(f"⏱ Video duration: {duration:.2f} seconds")
+        return duration
+    except ffmpeg.Error as e:
+        print(f"❌ Error probing duration: {e.stderr.decode() if e.stderr else 'No stderr'}")
+        return None
+
+def compress_video(input_path, output_path):
+    """
+    Compress a video to 720p with CRF 23 and capped bitrate using FFmpeg.
+    
+    Args:
+        input_path (str): Path to the input video.
+        output_path (str): Path to save the compressed video.
+    
+    Returns:
+        bool: True if compression succeeds, False otherwise.
+    """
+    try:
+        input_path = os.path.abspath(input_path)
+        output_path = os.path.abspath(output_path)
+        if not os.path.exists(input_path):
+            print(f"❌ Input file not found: {input_path}")
+            return False
+        
+        input_size = os.path.getsize(input_path) / (1024 * 1024)
+        print(f"📥 Input file size: {input_size:.2f} MB")
+        
+        duration = get_video_duration(input_path)
+        if duration is None:
+            print("❌ Skipping compression due to invalid input file")
+            return False
+        
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i", input_path,
+            "-vcodec", "libx264",
+            "-crf", "23",
+            "-preset", "veryfast",
+            "-b:v", "2000k",
+            "-maxrate", "2000k",
+            "-bufsize", "4000k",
+            "-vf", "scale=-2:720",
+            "-acodec", "aac",
+            "-ab", "128k",
+            "-movflags", "+faststart",
+            "-tune", "fastdecode",
+            "-threads", "2",
+            output_path
+        ]
+        
+        print(f"🔧 FFmpeg command: {' '.join(command)}")
+        
+        start_time = time.time()
+        result = subprocess.run(command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"❌ Compression failed:\nStderr: {result.stderr}\nStdout: {result.stdout}")
+            return False
+        
+        output_size = os.path.getsize(output_path) / (1024 * 1024)
+        compression_time = time.time() - start_time
+        print(f"✅ Compression completed: {output_path}")
+        print(f"📤 Output file size: {output_size:.2f} MB")
+        print(f"⏱ Compression time: {compression_time:.2f} seconds")
+        
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        
+        if output_size >= input_size:
+            print(f"⚠️ Warning: Output file size ({output_size:.2f} MB) is not smaller than input ({input_size:.2f} MB)")
+            return False
+        
+        return True
+    except Exception as e:
+        print(f"❌ Unexpected error during compression: {e}")
         return False
